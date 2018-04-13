@@ -3,10 +3,10 @@ import math
 from IPython import display
 from matplotlib import cm
 from matplotlib import gridspec
-import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-import sklearn.metrics as metrics
+from sklearn import metrics
 import tensorflow as tf
 from tensorflow.python.data import Dataset
 
@@ -14,45 +14,16 @@ tf.logging.set_verbosity(tf.logging.ERROR)
 pd.options.display.max_rows = 10
 pd.options.display.float_format = '{:.1f}'.format
 
-california_housing_dataframe = pd.read_csv("california_housing_train.csv", sep=",")
+california_housing_dataframe = \
+    pd.read_csv("california_housing_train.csv", sep=",")
 
-california_housing_dataframe = california_housing_dataframe.reindex(
-    np.random.permutation(california_housing_dataframe.index))
-california_housing_dataframe["median_house_value"] /= 1000.0
-print(california_housing_dataframe)
 
-# 输入函数
-def my_input_fn(features, targets, batch_size=1, shuffle=True, num_epochs=None):
+# learning_rate 学习速率
+# steps 迭代总次数
+# batch_size 单步样本数量
+# input_feature 输入特征
+def train_model(learning_rate, steps, batch_size, input_feature="total_rooms"):
     """Trains a linear regression model of one feature.
-
-    Args:
-      features: pandas DataFrame of features
-      targets: pandas DataFrame of targets
-      batch_size: Size of batches to be passed to the model
-      shuffle: True or False. Whether to shuffle the data.
-      num_epochs: Number of epochs for which data should be repeated. None = repeat indefinitely
-    Returns:
-      Tuple of (features, labels) for next data batch
-    """
-
-    # Convert pandas data into a dict of np arrays.
-    features = {key: np.array(value) for key, value in dict(features).items()}
-
-    # Construct a dataset, and configure batching/repeating
-    ds = Dataset.from_tensor_slices((features, targets))  # warning: 2GB limit
-    ds = ds.batch(batch_size).repeat(num_epochs)
-
-    # Shuffle the data, if specified
-    if shuffle:
-        ds = ds.shuffle(buffer_size=10000)
-
-    # Return the next batch of data
-    features, labels = ds.make_one_shot_iterator().get_next()
-    return features, labels
-
-
-def train_model(learning_rate, steps, batch_size, input_feature):
-    """Trains a linear regression model.
 
     Args:
       learning_rate: A `float`, the learning rate.
@@ -61,26 +32,23 @@ def train_model(learning_rate, steps, batch_size, input_feature):
       batch_size: A non-zero `int`, the batch size.
       input_feature: A `string` specifying a column from `california_housing_dataframe`
         to use as input feature.
-
-    Returns:
-      A Pandas `DataFrame` containing targets and the corresponding predictions done
-      after training the model.
     """
-
+    # 控制报告的粒度。如果 periods 设为 7 且 steps 设为 70，则练习将每 10 步（或 7 次）输出一次损失值。不建议修改 periods 的值。
+    # 修改 periods 不会更改模型所学习的内容。
     periods = 10
     steps_per_period = steps / periods
 
     my_feature = input_feature
-    my_feature_data = california_housing_dataframe[[my_feature]].astype('float32')
+    my_feature_data = california_housing_dataframe[[my_feature]]
     my_label = "median_house_value"
-    targets = california_housing_dataframe[my_label].astype('float32')
-
-    # Create input functions
-    training_input_fn = lambda: my_input_fn(my_feature_data, targets, batch_size=batch_size)
-    predict_training_input_fn = lambda: my_input_fn(my_feature_data, targets, num_epochs=1, shuffle=False)
+    targets = california_housing_dataframe[my_label]
 
     # Create feature columns
     feature_columns = [tf.feature_column.numeric_column(my_feature)]
+
+    # Create input functions
+    training_input_fn = lambda: my_input_fn(my_feature_data, targets, batch_size=batch_size)
+    prediction_input_fn = lambda: my_input_fn(my_feature_data, targets, num_epochs=1, shuffle=False)
 
     # Create a linear regressor object.
     my_optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
@@ -109,10 +77,10 @@ def train_model(learning_rate, steps, batch_size, input_feature):
         # Train the model, starting from the prior state.
         linear_regressor.train(
             input_fn=training_input_fn,
-            steps=steps_per_period,
+            steps=steps_per_period
         )
         # Take a break and compute predictions.
-        predictions = linear_regressor.predict(input_fn=predict_training_input_fn)
+        predictions = linear_regressor.predict(input_fn=prediction_input_fn)
         predictions = np.array([item['predictions'][0] for item in predictions])
 
         # Compute loss.
@@ -145,7 +113,7 @@ def train_model(learning_rate, steps, batch_size, input_feature):
     plt.tight_layout()
     plt.plot(root_mean_squared_errors)
 
-    # Create a table with calibration data.
+    # Output a table with calibration data.
     calibration_data = pd.DataFrame()
     calibration_data["predictions"] = pd.Series(predictions)
     calibration_data["targets"] = pd.Series(targets)
@@ -153,41 +121,39 @@ def train_model(learning_rate, steps, batch_size, input_feature):
 
     print("Final RMSE (on training data): %0.2f" % root_mean_squared_error)
 
-    return calibration_data
 
+def my_input_fn(features, targets, batch_size=1, shuffle=True, num_epochs=None):
+    """Trains a linear regression model of one feature.
 
-# 任务 1
-california_housing_dataframe["rooms_per_person"] = \
-    california_housing_dataframe["total_rooms"]/california_housing_dataframe["population"]
+    Args:
+      features: pandas DataFrame of features
+      targets: pandas DataFrame of targets
+      batch_size: Size of batches to be passed to the model
+      shuffle: True or False. Whether to shuffle the data.
+      num_epochs: Number of epochs for which data should be repeated. None = repeat indefinitely
+    Returns:
+      Tuple of (features, labels) for next data batch
+    """
 
-calibration_data = train_model(
-    learning_rate=0.05,
+    # Convert pandas data into a dict of np arrays.
+    features = {key: np.array(value) for key, value in dict(features).items()}
+
+    # Construct a dataset, and configure batching/repeating
+    ds = Dataset.from_tensor_slices((features, targets))  # warning: 2GB limit
+    ds = ds.batch(batch_size).repeat(num_epochs)
+
+    # Shuffle the data, if specified
+    if shuffle:
+        ds = ds.shuffle(buffer_size=10000)
+
+    # Return the next batch of data
+    features, labels = ds.make_one_shot_iterator().get_next()
+    return features, labels
+
+# 总是不能让 RMSE(均方根误差) 降低到能接受的水平，目前在 160000 上下
+train_model(
+    learning_rate=0.00002,
     steps=500,
     batch_size=5,
-    input_feature="rooms_per_person"
 )
-plt.show()
 
-# 任务 2
-plt.figure(figsize=(15, 6))
-plt.subplot(1, 2, 1)
-plt.scatter(calibration_data["predictions"], calibration_data["targets"])
-plt.show()
-
-plt.subplot(1, 2, 2)
-_ = california_housing_dataframe["rooms_per_person"].hist()
-plt.show()
-
-# 任务 3
-california_housing_dataframe["rooms_per_person"] = (california_housing_dataframe["rooms_per_person"]).apply(lambda x:min(x,5))
-_ = california_housing_dataframe["rooms_per_person"].hist()
-plt.show()
-
-
-calibration_data = train_model(
-    learning_rate=0.05,
-    steps=500,
-    batch_size=5,
-    input_feature="rooms_per_person")
-_ = plt.scatter(calibration_data["predictions"], calibration_data["targets"])
-plt.show()
